@@ -26,8 +26,9 @@ token_node(control, num)
 	struct TokenRingData *control;
 	int num;
 {
-	int rcv_state = TOKEN_FLAG, not_done = 1, sending = 0, len, sent, to;
-	//token flag means something to send?
+	int rcv_state = TOKEN_FLAG, not_done = 1, sending = 0, len, sent = 0, to;
+	//token flag to my understanding is the "waiting to recieve stuff" flag
+	//sent shows if I sent the first message I'm reading since sending. i.e. if I send a message, the first one I read next should be my own.
 	unsigned char byte;
 
 	/*
@@ -41,13 +42,32 @@ token_node(control, num)
 	/*
 	 * Loop around processing data, until done.
 	 */
+
+	//we should get len
+
+	WAIT_SEM(control, CRIT);
+	int sendLen = control->shared_ptr->node[num].to_send.length + 3; //to from len
+	SIGNAL_SEM(control, CRIT);
+
 	//critial sem
 	while (not_done) {
-
 
 		byte = rcv_byte(control, num);
 
 		//order for sending is token_flag->to->from->len->data
+
+		if (sending) {
+			send_pkt(control, num);
+			if (--sendLen == 0 ){
+				sending = 0;
+				sent = 1;
+			} else {
+				break;
+			}
+
+		}
+
+
 
 		/*
 		 * Handle the byte, based upon current state.
@@ -62,6 +82,8 @@ token_node(control, num)
 				if (control->shared_ptr->node[num].to_send.token_flag == '0') {
 					//we can send packet!
 					sending = 1;
+					control->snd_state = TOKEN_FLAG;
+
 					
 				} else {
 					//free to send, but nothing to send from this node
@@ -70,15 +92,7 @@ token_node(control, num)
 				SIGNAL_SEM(control, CRIT);
 
 
-				if (sending) {
-					//start process of sending our packet
-
-					WAIT_SEM(control, CRIT);
-					control->snd_state = TOKEN_FLAG;
-					SIGNAL_SEM(control, CRIT);
-					send_pkt(control, num);
-					rcv_state = TO; //not sure if should be changing rcv state... but whatever for now
-				} else {
+				if (!sending) {
 					//nothing to send from here
 					WAIT_SEM(control, CRIT);
 					//are we done?
@@ -95,87 +109,92 @@ token_node(control, num)
 
 			} else if (byte == '+') {
 				//starting a new string
-				send_byte(control, num, byte); //pass it along
+				if (!sent) {
+					send_byte(control, num, byte); //pass it along
+				}
 				rcv_state = TO;
 			} else {
 				//recieving gunk, pass period
 				send_byte(control, num, '.'); //
 			}
 
-
 			break;
 
 		case TO:
-			if (sending) {
-				send_pkt(control, num);
-			} else {
-				to = (int) byte;
-				send_byte(control, num, byte);
+
+			if (sent) {
+				rcv_state = FROM;
+				send_byte(control, num, '.');
+				break;
 			}
+
+			to = (int) byte;
+			send_byte(control, num, byte);
 			rcv_state = FROM;
+
+			if (to == num) {
+				WAIT_SEM(control, CRIT);
+				control->shared_ptr->node[num].received++;
+				SIGNAL_SEM(control, CRIT);
+			}
+			
 			break;
 
 		case FROM:
-			if (sending) {
-				send_pkt(control, num);
-			} else {
+
+
+			if (!sent) {
 				send_byte(control, num, byte);
+			} else {
+				send_byte(control,num, '.');
 			}
 			rcv_state = LEN;
 			break;
 
 		case LEN:
-			if (sending) {
-				send_pkt(control, num);
-				WAIT_SEM(control, CRIT);
-				len = control->shared_ptr->node[num].to_send.length;
-				SIGNAL_SEM(control, CRIT);
-			} else {
+
+			len = (int) byte;
+
+
+			if (!sent) {
 				send_byte(control, num, byte);
-				len = (int) byte;
+			} else {
+				send_byte(control,num, '.');
 			}
 
 			if (len > 0) {
 				rcv_state = DATA;
 			} else {
 				rcv_state = TOKEN_FLAG;
+				sent = 0;
 			}
 
 			break;
 
 		case DATA:
 			
-			if (len > 0) {
-				if (sending) {
-					send_pkt(control, num);
-				} else {
-					send_byte(control, num, byte);
-				}
-				len--;
+			if (!sent) {
+				send_byte(control, num, byte);
 			} else {
-				//should have sent/recieved all data
-				if (sending) {
-					WAIT_SEM(control, CRIT);
-					control->shared_ptr->node[num].sent++;
-					SIGNAL_SEM(control, CRIT);
-					send_byte(control, num, '/');
-				} else {
-					if (to == num) {
-						WAIT_SEM(control, CRIT);
-						control->shared_ptr->node[num].received++;
-						SIGNAL_SEM(control, CRIT);
-					}
-					send_byte(control, num, byte);
-				}
+				send_byte(control,num, '.');
+			}
 
-				sending = 0;
+			--len;
+
+			if (len == 0) {
+				sent = 0;
 				rcv_state = TOKEN_FLAG;
 			}
+
+
+			if (to == num) {
+				printf("%c", byte);
+			}
+
 
 			break;
 		};
 	}
-	//critial sem
 }
 
 /*
@@ -208,6 +227,7 @@ send_pkt(control, num)
 
 	case DATA:
 		...
+		//count +1 sent once done
 		break;
 
 	case DONE:
