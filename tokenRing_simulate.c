@@ -57,16 +57,18 @@ token_node(control, num)
 		if (control->shared_ptr->node[num].terminate) {
 			not_done = 0;
 			#ifdef DEBUG
-			fprintf(stderr, "terminating %d\n", num);
+				fprintf(stderr, "terminating %d\n", num);
 			#endif
+			SIGNAL_SEM(control, CRIT);
+			break;
 		}
-
 		SIGNAL_SEM(control, CRIT);
+
 
 
 		if (sending) {
 			#ifdef DEBUG
-					fprintf(stderr, "calling send packet %d\n", sendLen);
+					//fprintf(stderr, "calling send packet %d\n", sendLen);
 			#endif
 			send_pkt(control, num);
 			if (--sendLen == 0 ){
@@ -77,9 +79,9 @@ token_node(control, num)
 
 		byte = rcv_byte(control, num);
 
-		if (sending) {
-			continue;
-		}
+		// if (sending) {
+		// 	continue;
+		// }
 
 
 		/*
@@ -99,7 +101,7 @@ token_node(control, num)
 
 					sending = 1;
 					control->snd_state = TOKEN_FLAG;
-					sendLen = control->shared_ptr->node[num].to_send.length + 4; //to from len
+					sendLen = control->shared_ptr->node[num].to_send.length + 4; //to from len /
 					
 				} else {
 					//free to send, but nothing to send from this node
@@ -118,30 +120,26 @@ token_node(control, num)
 
 			} else if (byte == '+') {
 				//starting a new string
-				if (!sent) {
-					send_byte(control, num, byte); //pass it along
+
+				if (!sent && !sending) {
+					send_byte(control, num, byte);
+				} else {
+					#ifdef DEBUG
+						fprintf(stderr, "DISCARDING %d %c\n", num, byte);
+					#endif
 				}
 				rcv_state = TO;
 
 			} else {
 				//recieving gunk, pass period
-				send_byte(control, num, '.'); //
+				//send_byte(control, num, '.');
 			}
 
 			break;
 
 		case TO:
 
-
-
-			if (sent) {
-				rcv_state = FROM;
-				send_byte(control, num, '.');
-				break;
-			}
-
 			to = (int)byte;
-			send_byte(control, num, byte);
 			rcv_state = FROM;
 
 			if (to == num) {
@@ -149,16 +147,26 @@ token_node(control, num)
 				control->shared_ptr->node[num].received++;
 				SIGNAL_SEM(control, CRIT);
 			}
+
+			if (!sent && !sending) {
+				send_byte(control, num, byte);
+			} else {
+				#ifdef DEBUG
+					fprintf(stderr, "DISCARDING %d %c\n", num, byte);
+				#endif
+			}
 			
 			break;
 
 		case FROM:
 
 
-			if (!sent) {
+			if (!sent && !sending) {
 				send_byte(control, num, byte);
 			} else {
-				send_byte(control,num, '.');
+				#ifdef DEBUG
+					fprintf(stderr, "DISCARDING %d %c\n", num, byte);
+				#endif
 			}
 			rcv_state = LEN;
 			break;
@@ -168,10 +176,12 @@ token_node(control, num)
 			len = (int) byte;
 
 
-			if (!sent) {
+			if (!sent && !sending) {
 				send_byte(control, num, byte);
 			} else {
-				send_byte(control,num, '.');
+				#ifdef DEBUG
+					fprintf(stderr, "DISCARDING %d %c\n", num, byte);
+				#endif
 			}
 
 			if (len > 0) {
@@ -185,30 +195,39 @@ token_node(control, num)
 
 		case DATA:
 			
-			if (!sent) {
+			if (!sent && !sending) {
 				send_byte(control, num, byte);
 			} else {
-				send_byte(control,num, '.');
+				#ifdef DEBUG
+					fprintf(stderr, "DISCARDING %d %c\n", num, byte);
+				#endif
 			}
 
 			--len;
 
 			if (len == 0) {
+				if (sent && !sending) {
+					SIGNAL_SEM(control, TO_SEND(num)); // this is to say you can regenerate data for this node. here because if sent something, program will exit if nothing else to send regardless of if sent packet has been recieved
+				}
 				sent = 0;
 				rcv_state = TOKEN_FLAG;
+				
 			}
 
 
 			if (to == num) {
-#ifdef DEBUG
-				fprintf(stderr, "\n%c\n", byte);
-#endif
+				#ifdef DEBUG
+					fprintf(stderr, "%c", byte);
+				#endif
 			}
 
 
 			break;
 		};
 	}
+	#ifdef DEBUG
+    	fprintf(stderr, "Node %d exiting\n", num);
+    #endif
 }
 
 /*
@@ -228,24 +247,30 @@ send_pkt(control, num)
 		sndpos = 0;
 		sndlen = 0;
 		control->snd_state = TO;
+		#ifdef DEBUG
+				fprintf(stderr, "STARTING PACKET SEND %d\n", num);
+		#endif
+
 		SIGNAL_SEM(control, CRIT);
 		send_byte(control, num, '+');
+
 
 		break;
 
 	case TO:
 		control->snd_state = FROM;
-		SIGNAL_SEM(control, CRIT);
 
 		send_byte(control, num, control->shared_ptr->node[num].to_send.to);
+		SIGNAL_SEM(control, CRIT);
 
 		break;
 
 	case FROM:
 		control->snd_state = LEN;
+		send_byte(control, num, control->shared_ptr->node[num].to_send.from);
+
 		SIGNAL_SEM(control, CRIT);
 
-		send_byte(control, num, control->shared_ptr->node[num].to_send.from);
 
 		break;
 
@@ -253,9 +278,10 @@ send_pkt(control, num)
 		control->snd_state = DATA;
 		sndlen = control->shared_ptr->node[num].to_send.length;
 		sndpos = 0;
+		send_byte(control, num, sndlen);
+
 		SIGNAL_SEM(control, CRIT);
 
-		send_byte(control, num, sndlen);
 		break;
 
 	case DATA:
@@ -264,13 +290,14 @@ send_pkt(control, num)
 
 		if (sndpos == sndlen-1) {
 			send_byte(control, num, control->shared_ptr->node[num].to_send.data[sndpos]);
+			control->shared_ptr->node[num].to_send.length = 0;
 			control->snd_state = DONE;
 			SIGNAL_SEM(control,CRIT);
 			sndpos++;
 
 		} else {
-			SIGNAL_SEM(control,CRIT);
 			send_byte(control, num, control->shared_ptr->node[num].to_send.data[sndpos]);
+			SIGNAL_SEM(control,CRIT);
 			sndpos++;
 			break;
 		}
@@ -287,16 +314,17 @@ send_pkt(control, num)
 		control->shared_ptr->node[num].sent++;
 		control->shared_ptr->node[num].to_send.token_flag = '1';
 	
-#ifdef DEBUG
-        fprintf(stderr, "FINISHED SENDING PACKET\n");
-#endif
-
+		#ifdef DEBUG
+				fprintf(stderr, "FINISHED SENDING PACKET %d\n", num);
+		#endif
 		SIGNAL_SEM(control,CRIT);
 		send_byte(control, num, '/');
-		SIGNAL_SEM(control, TO_SEND(num)); // this is to say you can regenerate data for this node
+
+		//SIGNAL_SEM(control, TO_SEND(num)); // this is to say you can regenerate data for this node
 
 		break;
 	};
+
 }
 
 /*
@@ -310,14 +338,17 @@ send_byte(control, num, byte)
 {
 
 	int sendTo = (num + 1) % N_NODES;
-
+	#ifdef DEBUG
+		fprintf(stderr, "WAITING TO SEND %d\n", num);
+	#endif
 	WAIT_SEM(control, EMPTY(sendTo));
 	control->shared_ptr->node[sendTo].data_xfer = byte;
-	SIGNAL_SEM(control, FILLED(sendTo));
-
 #ifdef DEBUG
 	fprintf(stderr, "sent byte:%d:%c from %d \n", byte,byte, num);
 #endif
+	SIGNAL_SEM(control, FILLED(sendTo));
+
+
 }
 
 
@@ -330,13 +361,15 @@ rcv_byte(control, num)
 	int num;
 {
 	unsigned char byte;
-
+	#ifdef DEBUG
+		fprintf(stderr, "WAITING TO RECIEVE %d \n", num);
+	#endif
 
 	WAIT_SEM(control, FILLED(num));
 	byte = control->shared_ptr->node[num].data_xfer;
-#ifdef DEBUG
-				fprintf(stderr, "rec byte:%d:%c from %d\n", byte, byte, num);
-#endif
+	#ifdef DEBUG
+		fprintf(stderr, "rec byte:%d:%c from %d\n", byte, byte, num);
+	#endif
 	SIGNAL_SEM(control, EMPTY(num));
 
 	return byte;
