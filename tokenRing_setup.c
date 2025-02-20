@@ -34,6 +34,7 @@
 struct TokenRingData *
 setupSystem()
 {
+
 	register int i;
 	struct TokenRingData *control;
 
@@ -57,6 +58,7 @@ setupSystem()
 	 * and map the shared data region into our address space at an
 	 * address selected by Linux.
 	 */
+
 	control->shared_ptr = (struct shared_data *)
 	    	shmat(control->shmid, (char *)0, 0);
 	if (control->shared_ptr == (struct shared_data *)0) {
@@ -80,19 +82,23 @@ setupSystem()
 	 * and initialize them.
 	 * Semaphores are meaningless if they are not initialized.
 	 */
+
+
 	for (i = 0; i < N_NODES; i++) {
 		INITIALIZE_SEM(control, EMPTY(i), 1); // empty sem
 		INITIALIZE_SEM(control, FILLED(i), 0); //all empty
-		INITIALIZE_SEM(control, TO_SEND(i), 0); //no control
+		INITIALIZE_SEM(control, TO_SEND(i), 1); //no control
 	}
+
+
 
 	INITIALIZE_SEM(control, CRIT, 1);
 	/*
 	 * And initialize the shared data
 	 */
     for (i = 0; i < N_NODES; i++) {
-        control->shared_ptr->node[i].data_xfer = 0;
-        control->shared_ptr->node[i].to_send.token_flag = 0;
+        control->shared_ptr->node[i].to_send.token_flag = '1';
+		control->shared_ptr->node[i].data_xfer = '.';
         control->shared_ptr->node[i].to_send.to = 0;
         control->shared_ptr->node[i].to_send.from = 0;
         control->shared_ptr->node[i].to_send.length = 0;
@@ -143,7 +149,7 @@ runSimulation(control, numberOfPackets)
 		 * Add a packet to be sent to to_send for that node.
 		 */
 #ifdef DEBUG
-		fprintf(stderr, "Main in generate packets\n");
+		//fprintf(stderr, "Main in generate packets\n");
 #endif
 		num = random() % N_NODES;
 		WAIT_SEM(control, TO_SEND(num));
@@ -160,7 +166,13 @@ runSimulation(control, numberOfPackets)
 
 		control->shared_ptr->node[num].to_send.to = (char)to;
 		control->shared_ptr->node[num].to_send.from = (char)num;
-		control->shared_ptr->node[num].to_send.length = (random() % MAX_DATA) + 1;
+		//control->shared_ptr->node[num].to_send.length = (random() % MAX_DATA) + 1;
+		control->shared_ptr->node[num].to_send.length = 4;
+		char string[] = {'h', 'e', 'l', 'p'};
+		memcpy(control->shared_ptr->node[num].to_send.data, string, sizeof(string));
+#ifdef DEBUG
+		fprintf(stderr, "generated packet for %d\n", num);
+#endif
 		SIGNAL_SEM(control, CRIT);
 	}
 

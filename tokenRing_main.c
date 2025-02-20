@@ -39,6 +39,7 @@ main(argc, argv)
 	int argc;
 	const char **argv;
 {
+
 	int numPackets;
 	TokenRingData *simulationData;
 
@@ -53,6 +54,7 @@ main(argc, argv)
 		printHelp(argv[0]);
 		exit(1);
 	}
+
 
 	if (( simulationData = setupSystem()) == NULL) {
 		fprintf(stderr, "Setup failed\n");

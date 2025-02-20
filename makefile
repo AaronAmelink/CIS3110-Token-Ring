@@ -1,5 +1,5 @@
 CC		= gcc
-CFLAGS		= -pedantic -Wall
+CFLAGS		= -pedantic -Wall -DDEBUG
 
 EXE		= tokensim
 
@@ -11,7 +11,7 @@ OBJS		= \
 		tokenRing_simulate.o
 
 $(EXE) : $(OBJS)
-	$(CC) -o $(EXE) $(OBJS)
+	$(CC) -o $(EXE) $(OBJS) -DEBUG
 
 clean :
 	@ rm -f $(OBJS)
