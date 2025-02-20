@@ -176,6 +176,12 @@ runSimulation(control, numberOfPackets)
 		SIGNAL_SEM(control, CRIT);
 	}
 
+	
+#ifdef DEBUG
+fprintf(stderr, "FINISHED GENERATING ALL PACKETS\n");
+#endif
+
+
 	return 1;
 }
 

@@ -52,11 +52,22 @@ token_node(control, num)
 
 		//order for sending is token_flag->to->from->len->data
 
+		WAIT_SEM(control, CRIT);
+		//are we done?
+		if (control->shared_ptr->node[num].terminate) {
+			not_done = 0;
+			#ifdef DEBUG
+			fprintf(stderr, "terminating %d\n", num);
+			#endif
+		}
+
+		SIGNAL_SEM(control, CRIT);
+
 
 		if (sending) {
-#ifdef DEBUG
-		fprintf(stderr, "calling send packet %d\n", sendLen);
-#endif
+			#ifdef DEBUG
+					fprintf(stderr, "calling send packet %d\n", sendLen);
+			#endif
 			send_pkt(control, num);
 			if (--sendLen == 0 ){
 				sending = 0;
@@ -85,9 +96,7 @@ token_node(control, num)
 				WAIT_SEM(control, CRIT);
 				if (control->shared_ptr->node[num].to_send.token_flag == '0') {
 					//we can send packet!
-#ifdef DEBUG
-		fprintf(stderr, "starting packet send from %d\n", num);
-#endif
+
 					sending = 1;
 					control->snd_state = TOKEN_FLAG;
 					sendLen = control->shared_ptr->node[num].to_send.length + 4; //to from len
@@ -101,16 +110,6 @@ token_node(control, num)
 
 				if (!sending) {
 					//nothing to send from here
-					WAIT_SEM(control, CRIT);
-					//are we done?
-					if (control->shared_ptr->node[num].terminate) {
-						not_done = 0;
-#ifdef DEBUG
-		fprintf(stderr, "terminating %d\n", num);
-#endif
-					}
-
-					SIGNAL_SEM(control, CRIT);
 
 					send_byte(control, num, byte);
 					rcv_state = TOKEN_FLAG;
@@ -123,9 +122,7 @@ token_node(control, num)
 					send_byte(control, num, byte); //pass it along
 				}
 				rcv_state = TO;
-#ifdef DEBUG
-        fprintf(stderr, "rcv: state TOKEN_FLAG, transitioning to TO %d\n", num);
-#endif
+
 			} else {
 				//recieving gunk, pass period
 				send_byte(control, num, '.'); //
@@ -135,9 +132,7 @@ token_node(control, num)
 
 		case TO:
 
-#ifdef DEBUG
-        fprintf(stderr, "rcv: state TO, transitioning to FROM %d\n", num);
-#endif
+
 
 			if (sent) {
 				rcv_state = FROM;
@@ -145,7 +140,7 @@ token_node(control, num)
 				break;
 			}
 
-			to = byte - 48;
+			to = (int)byte;
 			send_byte(control, num, byte);
 			rcv_state = FROM;
 
@@ -206,7 +201,7 @@ token_node(control, num)
 
 			if (to == num) {
 #ifdef DEBUG
-				fprintf(stderr, "awdawdasd");
+				fprintf(stderr, "\n%c\n", byte);
 #endif
 			}
 
@@ -236,9 +231,6 @@ send_pkt(control, num)
 		SIGNAL_SEM(control, CRIT);
 		send_byte(control, num, '+');
 
-#ifdef DEBUG
-        fprintf(stderr, "send_pkt: state TOKEN_FLAG, transitioning to TO\n");
-#endif
 		break;
 
 	case TO:
@@ -246,9 +238,7 @@ send_pkt(control, num)
 		SIGNAL_SEM(control, CRIT);
 
 		send_byte(control, num, control->shared_ptr->node[num].to_send.to);
-#ifdef DEBUG
-        fprintf(stderr, "send_pkt: state TO, transitioning to FROM %d\n", control->shared_ptr->node[num].to_send.to);
-#endif
+
 		break;
 
 	case FROM:
@@ -256,9 +246,7 @@ send_pkt(control, num)
 		SIGNAL_SEM(control, CRIT);
 
 		send_byte(control, num, control->shared_ptr->node[num].to_send.from);
-#ifdef DEBUG
-        fprintf(stderr, "send_pkt: state FROM, transitioning to LEN\n");
-#endif
+
 		break;
 
 	case LEN:
@@ -266,18 +254,19 @@ send_pkt(control, num)
 		sndlen = control->shared_ptr->node[num].to_send.length;
 		sndpos = 0;
 		SIGNAL_SEM(control, CRIT);
-#ifdef DEBUG
-        fprintf(stderr, "send_pkt: state LEN, transitioning to DATA\n");
-#endif
+
 		send_byte(control, num, sndlen);
 		break;
 
 	case DATA:
+		
+		
 
-
-		if (sndpos >= sndlen) {
+		if (sndpos == sndlen-1) {
+			send_byte(control, num, control->shared_ptr->node[num].to_send.data[sndpos]);
 			control->snd_state = DONE;
 			SIGNAL_SEM(control,CRIT);
+			sndpos++;
 
 		} else {
 			SIGNAL_SEM(control,CRIT);
@@ -293,16 +282,18 @@ send_pkt(control, num)
 
 	case DONE:
 		//reset
-		WAIT_SEM(control, CRIT);
 		sndpos = 0;
 		sndlen = 0;
 		control->shared_ptr->node[num].sent++;
 		control->shared_ptr->node[num].to_send.token_flag = '1';
-		SIGNAL_SEM(control, TO_SEND(num)); // this is to say you can regenerate data for this node
-
+	
+#ifdef DEBUG
+        fprintf(stderr, "FINISHED SENDING PACKET\n");
+#endif
 
 		SIGNAL_SEM(control,CRIT);
 		send_byte(control, num, '/');
+		SIGNAL_SEM(control, TO_SEND(num)); // this is to say you can regenerate data for this node
 
 		break;
 	};
