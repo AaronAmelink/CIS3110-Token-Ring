@@ -26,10 +26,12 @@ token_node(control, num)
 	struct TokenRingData *control;
 	int num;
 {
-	int rcv_state = TOKEN_FLAG, not_done = 1, sending = 0, len, sent = 0, to, sendLen;
+	int rcv_state = TOKEN_FLAG, not_done = 1, sending = 0, len, sent = 0, to, sendLen, from, dataLen;
 	//token flag to my understanding is the "waiting to recieve stuff" flag
 	//sent shows if I sent the first message I'm reading since sending. i.e. if I send a message, the first one I read next should be my own.
 	unsigned char byte;
+	char toBuffer[MAX_DATA+1]; // +\0
+	int strPos = 0;
 
 	/*
 	 * If this is node #0, start the ball rolling by creating the
@@ -52,17 +54,7 @@ token_node(control, num)
 
 		//order for sending is token_flag->to->from->len->data
 
-		WAIT_SEM(control, CRIT);
-		//are we done?
-		if (control->shared_ptr->node[num].terminate) {
-			not_done = 0;
-			#ifdef DEBUG
-				fprintf(stderr, "terminating %d\n", num);
-			#endif
-			SIGNAL_SEM(control, CRIT);
-			break;
-		}
-		SIGNAL_SEM(control, CRIT);
+
 
 
 
@@ -90,7 +82,18 @@ token_node(control, num)
 		switch (rcv_state) {
 		case TOKEN_FLAG:
 
-
+			WAIT_SEM(control, CRIT);
+			//are we done?
+			if (control->shared_ptr->node[num].terminate) {
+				not_done = 0;
+				#ifdef DEBUG
+					fprintf(stderr, "terminating %d\n", num);
+				#endif
+				SIGNAL_SEM(control, CRIT);
+				send_byte(control, num, byte);
+				break;
+			}
+			SIGNAL_SEM(control, CRIT);
 
 			if (byte == '/') {
 				//free to send data
@@ -160,6 +163,7 @@ token_node(control, num)
 
 		case FROM:
 
+			from = (int)byte;
 
 			if (!sent && !sending) {
 				send_byte(control, num, byte);
@@ -174,6 +178,7 @@ token_node(control, num)
 		case LEN:
 
 			len = (int) byte;
+			dataLen = (int) byte;
 
 
 			if (!sent && !sending) {
@@ -194,7 +199,6 @@ token_node(control, num)
 			break;
 
 		case DATA:
-			
 			if (!sent && !sending) {
 				send_byte(control, num, byte);
 			} else {
@@ -205,22 +209,25 @@ token_node(control, num)
 
 			--len;
 
+			if (to == num) {
+
+				toBuffer[strPos] = byte;
+				strPos++;
+			}
+
 			if (len == 0) {
 				if (sent && !sending) {
 					SIGNAL_SEM(control, TO_SEND(num)); // this is to say you can regenerate data for this node. here because if sent something, program will exit if nothing else to send regardless of if sent packet has been recieved
 				}
 				sent = 0;
 				rcv_state = TOKEN_FLAG;
+				if (to == num) {
+					toBuffer[strPos] = '\0';
+					printf("RECIEVED DATA: %s \nFROM:%d\nTO:%d\nLEN:%d\n\n", toBuffer, from, to, dataLen);
+					strPos = 0;
+				}
 				
 			}
-
-
-			if (to == num) {
-				#ifdef DEBUG
-					fprintf(stderr, "%c", byte);
-				#endif
-			}
-
 
 			break;
 		};

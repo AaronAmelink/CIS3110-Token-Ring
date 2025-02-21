@@ -1,5 +1,5 @@
 CC		= gcc
-CFLAGS		= -pedantic -Wall -DDEBUG
+CFLAGS		= -pedantic -Wall
 
 EXE		= tokensim
 

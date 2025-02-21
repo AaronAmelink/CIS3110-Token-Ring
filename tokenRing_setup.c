@@ -85,8 +85,8 @@ setupSystem()
 
 
 	for (i = 0; i < N_NODES; i++) {
-		INITIALIZE_SEM(control, EMPTY(i), 1); // empty sem
-		INITIALIZE_SEM(control, FILLED(i), 0); //all empty
+		INITIALIZE_SEM(control, EMPTY(i), 0); // empty sem
+		INITIALIZE_SEM(control, FILLED(i), 1); //all empty
 		INITIALIZE_SEM(control, TO_SEND(i), 1); //no control
 	}
 
@@ -144,6 +144,7 @@ runSimulation(control, numberOfPackets)
 	 * Loop around generating packets at random.
 	 * (the parent)
 	 */
+	int paint = 0;
 	for (i = 0; i < numberOfPackets; i++) {
 		/*
 		 * Add a packet to be sent to to_send for that node.
@@ -164,12 +165,11 @@ runSimulation(control, numberOfPackets)
 			to = random() % N_NODES;
 		} while (to == num);
 
+
 		control->shared_ptr->node[num].to_send.to = (char)to;
 		control->shared_ptr->node[num].to_send.from = (char)num;
-		//control->shared_ptr->node[num].to_send.length = (random() % MAX_DATA) + 1;
-		control->shared_ptr->node[num].to_send.length = 4;
-		char string[] = {'h', 'e', 'l', 'p'};
-		memcpy(control->shared_ptr->node[num].to_send.data, string, sizeof(string));
+		control->shared_ptr->node[num].to_send.length = (random() % MAX_DATA) + 1;
+		memset(control->shared_ptr->node[num].to_send.data, 65 + ((paint++) % 26), control->shared_ptr->node[num].to_send.length);
 #ifdef DEBUG
 		fprintf(stderr, "generated packet for %d\n", num);
 #endif
